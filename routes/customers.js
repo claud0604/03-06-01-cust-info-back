@@ -11,13 +11,15 @@ const authApiKey = require('../middleware/authApiKey');
  */
 function generateCustomerId() {
     const now = new Date();
-    const y = now.getFullYear();
-    const mo = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    const h = String(now.getHours()).padStart(2, '0');
-    const mi = String(now.getMinutes()).padStart(2, '0');
-    const s = String(now.getSeconds()).padStart(2, '0');
-    const ms = String(now.getMilliseconds()).padStart(3, '0');
+    // Convert to KST (UTC+9)
+    const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    const y = kst.getUTCFullYear();
+    const mo = String(kst.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(kst.getUTCDate()).padStart(2, '0');
+    const h = String(kst.getUTCHours()).padStart(2, '0');
+    const mi = String(kst.getUTCMinutes()).padStart(2, '0');
+    const s = String(kst.getUTCSeconds()).padStart(2, '0');
+    const ms = String(kst.getUTCMilliseconds()).padStart(3, '0');
     return `${y}${mo}${d}${h}${mi}${s}${ms}`;
 }
 
