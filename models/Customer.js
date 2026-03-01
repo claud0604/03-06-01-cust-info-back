@@ -1,6 +1,6 @@
 /**
  * Customer Model - MongoDB Schema
- * Collection: 01_customers
+ * Collection: 01-custinfo
  */
 const mongoose = require('mongoose');
 
@@ -178,7 +178,7 @@ const customerSchema = new mongoose.Schema({
     }
 }, {
     timestamps: true,
-    collection: '01_customers'
+    collection: '01-custinfo'
 });
 
 // Indexes
