@@ -4,8 +4,7 @@
 const express = require('express');
 const router = express.Router();
 const Customer = require('../models/Customer');
-const { s3Client, S3_CONFIG } = require('../config/s3');
-const { GetObjectCommand } = require('@aws-sdk/client-s3');
+const { bucket } = require('../config/gcs');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // Gemini setup
@@ -137,31 +136,18 @@ You are a professional personal color consultant. Analyze the provided customer 
 `;
 
 /**
- * Download S3 image and convert to base64
+ * Download GCS image and convert to base64
  */
-async function getS3ImageAsBase64(s3Key) {
-    if (!s3Key) return null;
+async function getGCSImageAsBase64(gcsKey) {
+    if (!gcsKey) return null;
 
     try {
-        const command = new GetObjectCommand({
-            Bucket: S3_CONFIG.bucket,
-            Key: s3Key
-        });
-
-        const response = await s3Client.send(command);
-        const chunks = [];
-
-        for await (const chunk of response.Body) {
-            chunks.push(chunk);
-        }
-
-        const buffer = Buffer.concat(chunks);
+        const file = bucket.file(gcsKey);
+        const [buffer] = await file.download();
         const base64 = buffer.toString('base64');
-        const contentType = response.ContentType || 'image/jpeg';
-
-        return { base64, contentType };
+        return { base64, contentType: 'image/jpeg' };
     } catch (error) {
-        console.error('S3 image download failed:', error.message);
+        console.error('GCS image download failed:', error.message);
         return null;
     }
 }
@@ -283,15 +269,15 @@ router.post('/diagnose', async (req, res) => {
             });
         }
 
-        // 3. Download S3 images as base64
-        console.log('Downloading S3 images...');
-        const faceImage = await getS3ImageAsBase64(faceFrontKey);
-        const bodyImage = await getS3ImageAsBase64(bodyFrontKey);
+        // 3. Download GCS images as base64
+        console.log('Downloading GCS images...');
+        const faceImage = await getGCSImageAsBase64(faceFrontKey);
+        const bodyImage = await getGCSImageAsBase64(bodyFrontKey);
 
         if (!faceImage || !bodyImage) {
             return res.status(500).json({
                 success: false,
-                message: 'S3 image download failed.'
+                message: 'GCS image download failed.'
             });
         }
 
