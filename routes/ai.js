@@ -1,19 +1,16 @@
 /**
- * AI Diagnosis API — Hybrid: Internal Classifier + Gemini 3.1 Flash Lite Vision
+ * AI Diagnosis API — Gemini 3.1 Flash Lite Vision
  *
- * For cust-info (expert panel), images are available from GCS.
- * Flow:
- *   1. If measurements are available → internal classifier runs first
- *   2. Gemini 3.1 Flash Lite Vision analyzes photos
- *   3. If internal result exists, Gemini is told the pre-classified type
- *   4. Results merged: internal type (if high confidence) + Gemini description
+ * For cust-info backend, Gemini Vision analyzes customer photos from GCS.
+ * Internal classification runs on the landing backend only.
  */
 const express = require('express');
 const router = express.Router();
 const Customer = require('../models/Customer');
 const { bucket } = require('../config/gcs');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { fullDiagnosis, classifyPersonalColor, labUtils } = require('../services/apl-color-classifier');
+// Note: Internal classifier removed from cust-info backend.
+// Classification runs on landing backend; cust-info uses Gemini Vision only.
 
 // Gemini setup
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -130,57 +127,6 @@ You are a professional personal color consultant. Analyze the provided customer 
   "avoidColors": ["Black", "Cool Gray", "Neon", "Dark Brown"]
 }
 `;
-
-/**
- * Build hybrid prompt when internal classifier has already determined the type
- */
-function buildHybridVisionPrompt(internalResult, customerInfo) {
-    const pc = internalResult.personalColor;
-
-    let prompt = `# APL Personal Color Diagnosis — Expert Description Writer
-
-You are a professional personal color consultant. Our internal classification engine has analyzed the customer's color measurements and determined the following:
-
-## Pre-Determined Classification (DO NOT change the type)
-- Personal Color: ${pc.type}
-- Season: ${pc.season}
-- Confidence: ${pc.confidence}
-- Characteristics: Hue=${pc.characteristics.hue}, Value=${pc.characteristics.value}, Chroma=${pc.characteristics.chroma}, Contrast=${pc.characteristics.contrast}`;
-
-    if (internalResult.faceShape) {
-        prompt += `\n- Face Shape: ${internalResult.faceShape.type} (confidence: ${internalResult.faceShape.confidence})`;
-    }
-    if (internalResult.bodyType) {
-        prompt += `\n- Body Type: ${internalResult.bodyType.type} (confidence: ${internalResult.bodyType.confidence})`;
-    }
-
-    prompt += `
-
-## Your Task
-Analyze the photos and write professional, detailed descriptions for the diagnosis.
-The personal color TYPE is already decided — focus on writing expert-level explanations.
-You may refine face shape and body type based on the photos if the internal result seems inaccurate.
-
-Customer Info: Name ${customerInfo.name}, Age ${customerInfo.age}, Gender ${customerInfo.gender === 'female' ? 'Female' : 'Male'}
-
-Respond with JSON only:
-{
-  "personalColor": "${pc.type}",
-  "personalColorDetail": "...",
-  "personalColorCharacteristics": ${JSON.stringify(pc.characteristics)},
-  "faceShape": "${internalResult.faceShape ? internalResult.faceShape.type : '...'}",
-  "faceShapeDetail": "...",
-  "faceFeatures": { "forehead": "...", "cheekbone": "...", "jawline": "..." },
-  "bodyType": "${internalResult.bodyType ? internalResult.bodyType.type : '...'}",
-  "bodyTypeDetail": "...",
-  "bodyFeatures": { "shoulder": "...", "waist": "...", "hip": "..." },
-  "stylingKeywords": ["...", "...", "...", "..."],
-  "bestColors": ["...", "...", "...", "...", "..."],
-  "avoidColors": ["...", "...", "...", "..."]
-}`;
-
-    return prompt;
-}
 
 /**
  * Download GCS image and convert to base64
@@ -308,37 +254,7 @@ router.post('/diagnose', async (req, res) => {
             });
         }
 
-        // 3. Run internal classifier if measurement data is available
-        let internalResult = null;
-        const measurements = customer.faceAnalysis || customer.measurements;
-
-        if (measurements && measurements.skinColor && measurements.skinColor.lab) {
-            try {
-                const classifierInput = {
-                    skinColor: measurements.skinColor,
-                    hairColor: measurements.hairColor || null,
-                    eyeColor: measurements.eyeColor || null,
-                    contrast: measurements.contrast || null,
-                    backgroundColor: measurements.backgroundColor || null,
-                    neckColor: measurements.neckColor || null,
-                    faceProportions: measurements.faceProportions || null,
-                    bodyProportions: measurements.bodyProportions || null
-                };
-
-                // Convert background RGB to LAB if needed
-                if (classifierInput.backgroundColor && !classifierInput.backgroundColor.lab && classifierInput.backgroundColor.rgb) {
-                    const { r, g, b } = classifierInput.backgroundColor.rgb;
-                    classifierInput.backgroundColor = { lab: labUtils.rgbToLab(r, g, b), rgb: classifierInput.backgroundColor.rgb };
-                }
-
-                internalResult = fullDiagnosis(classifierInput);
-                console.log(`Internal classifier: ${internalResult.personalColor.type} (confidence: ${internalResult.personalColor.confidence}), strategy: ${internalResult.strategy}`);
-            } catch (err) {
-                console.warn('Internal classifier skipped:', err.message);
-            }
-        }
-
-        // 4. Download GCS images as base64
+        // 3. Download GCS images as base64
         console.log('Downloading GCS images...');
         const faceImage = await getGCSImageAsBase64(faceFrontKey);
         const bodyImage = await getGCSImageAsBase64(bodyFrontKey);
@@ -350,67 +266,40 @@ router.post('/diagnose', async (req, res) => {
             });
         }
 
-        // 5. Build prompt based on strategy
-        const useInternalType = internalResult && internalResult.strategy !== 'gemini';
-        let prompt;
-
-        if (useInternalType) {
-            prompt = buildHybridVisionPrompt(internalResult, customer.customerInfo);
-        } else {
-            prompt = `${APL_DIAGNOSIS_GUIDELINE}
+        // 4. Build prompt (Gemini-only mode)
+        const prompt = `${APL_DIAGNOSIS_GUIDELINE}
 
 Customer Info: Name ${customer.customerInfo.name}, Age ${customer.customerInfo.age}, Gender ${customer.customerInfo.gender === 'female' ? 'Female' : 'Male'}
 
 Analyze the photos below and diagnose personal color, face shape, and body type. Respond with JSON only.`;
-        }
 
-        // 6. Call Gemini Vision API
-        console.log(`Calling Gemini Vision API (mode: ${useInternalType ? 'hybrid' : 'full'})...`);
+        // 5. Call Gemini Vision API
+        console.log('Calling Gemini Vision API...');
         const { diagnosis, rawResponse } = await callGeminiVision(faceImage, bodyImage, prompt);
 
-        // 7. Merge results
-        const finalDiagnosis = {};
-
-        if (useInternalType) {
-            finalDiagnosis.personalColor = internalResult.personalColor.type;
-            finalDiagnosis.personalColorCharacteristics = internalResult.personalColor.characteristics;
-        } else {
-            finalDiagnosis.personalColor = diagnosis.personalColor;
-            finalDiagnosis.personalColorCharacteristics = diagnosis.personalColorCharacteristics;
-        }
-
-        // Description and other fields from Gemini
-        finalDiagnosis.personalColorDetail = diagnosis.personalColorDetail;
-        finalDiagnosis.faceShape = diagnosis.faceShape;
-        finalDiagnosis.faceShapeDetail = diagnosis.faceShapeDetail;
-        finalDiagnosis.faceFeatures = diagnosis.faceFeatures;
-        finalDiagnosis.bodyType = diagnosis.bodyType;
-        finalDiagnosis.bodyTypeDetail = diagnosis.bodyTypeDetail;
-        finalDiagnosis.bodyFeatures = diagnosis.bodyFeatures;
-        finalDiagnosis.stylingKeywords = diagnosis.stylingKeywords;
-        finalDiagnosis.bestColors = diagnosis.bestColors;
-        finalDiagnosis.avoidColors = diagnosis.avoidColors;
-
-        // 8. Save to aiDiagnosis
+        // 6. Save to aiDiagnosis
         customer.aiDiagnosis = {
-            ...finalDiagnosis,
+            personalColor: diagnosis.personalColor,
+            personalColorDetail: diagnosis.personalColorDetail,
+            personalColorCharacteristics: diagnosis.personalColorCharacteristics,
+            faceShape: diagnosis.faceShape,
+            faceShapeDetail: diagnosis.faceShapeDetail,
+            faceFeatures: diagnosis.faceFeatures,
+            bodyType: diagnosis.bodyType,
+            bodyTypeDetail: diagnosis.bodyTypeDetail,
+            bodyFeatures: diagnosis.bodyFeatures,
+            stylingKeywords: diagnosis.stylingKeywords,
+            bestColors: diagnosis.bestColors,
+            avoidColors: diagnosis.avoidColors,
             generatedAt: new Date(),
             isCompleted: true,
             rawGeminiResponse: rawResponse,
-            classificationSource: useInternalType ? 'internal' : 'gemini',
-            internalClassification: internalResult ? {
-                personalColor: internalResult.personalColor,
-                faceShape: internalResult.faceShape,
-                bodyType: internalResult.bodyType,
-                backgroundCorrection: internalResult.backgroundCorrection,
-                confidence: internalResult.confidence,
-                strategy: internalResult.strategy
-            } : null
+            classificationSource: 'gemini'
         };
 
         await customer.save();
 
-        console.log(`AI diagnosis complete: ${finalDiagnosis.personalColor}, ${finalDiagnosis.faceShape}, ${finalDiagnosis.bodyType} (${useInternalType ? 'internal' : 'gemini'})`);
+        console.log(`AI diagnosis complete: ${diagnosis.personalColor}, ${diagnosis.faceShape}, ${diagnosis.bodyType}`);
 
         res.json({
             success: true,
@@ -422,43 +311,6 @@ Analyze the photos below and diagnose personal color, face shape, and body type.
         res.status(500).json({
             success: false,
             message: 'AI diagnosis failed.',
-            error: error.message
-        });
-    }
-});
-
-/**
- * POST /api/ai/classify
- * Internal classification only (no Gemini call) — for testing/debugging
- */
-router.post('/classify', async (req, res) => {
-    try {
-        const { measurements } = req.body;
-
-        if (!measurements || !measurements.skinColor || !measurements.skinColor.lab) {
-            return res.status(400).json({
-                success: false,
-                message: 'measurements.skinColor.lab is required.'
-            });
-        }
-
-        // Convert background RGB to LAB if needed
-        if (measurements.backgroundColor && !measurements.backgroundColor.lab && measurements.backgroundColor.rgb) {
-            const { r, g, b } = measurements.backgroundColor.rgb;
-            measurements.backgroundColor = { lab: labUtils.rgbToLab(r, g, b), rgb: measurements.backgroundColor.rgb };
-        }
-
-        const result = fullDiagnosis(measurements);
-
-        res.json({
-            success: true,
-            result
-        });
-    } catch (error) {
-        console.error('Classification error:', error.message);
-        res.status(500).json({
-            success: false,
-            message: 'Classification failed.',
             error: error.message
         });
     }
