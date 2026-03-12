@@ -48,8 +48,8 @@ router.post('/', async (req, res, next) => {
             customerInfo,
             appointment: { date: '', time: '' },
             customerPhotos: {
-                face: { front: '', angle45: '', side: '', video: '' },
-                body: { front: '', angle45: '', side: '', video: '' },
+                face: { front: '', side: '', video: '' },
+                body: { front: '', side: '', video: '' },
                 reference: { makeup: [], fashion: [] }
             },
             mediaMetadata: {

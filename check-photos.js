@@ -26,13 +26,11 @@ async function main() {
 
         console.log('=== Face Photos ===');
         console.log(`Front:  ${customer.customerPhotos.face.front || '(empty)'}`);
-        console.log(`45deg:  ${customer.customerPhotos.face.angle45 || '(empty)'}`);
         console.log(`Side:   ${customer.customerPhotos.face.side || '(empty)'}`);
         console.log(`Video:  ${customer.customerPhotos.face.video || '(empty)'}`);
 
         console.log('\n=== Body Photos ===');
         console.log(`Front:  ${customer.customerPhotos.body.front || '(empty)'}`);
-        console.log(`45deg:  ${customer.customerPhotos.body.angle45 || '(empty)'}`);
         console.log(`Side:   ${customer.customerPhotos.body.side || '(empty)'}`);
         console.log(`Video:  ${customer.customerPhotos.body.video || '(empty)'}`);
 

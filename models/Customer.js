@@ -38,13 +38,11 @@ const customerSchema = new mongoose.Schema({
     customerPhotos: {
         face: {
             front: { type: String, default: '' },
-            angle45: { type: String, default: '' },
             side: { type: String, default: '' },
             video: { type: String, default: '' }
         },
         body: {
             front: { type: String, default: '' },
-            angle45: { type: String, default: '' },
             side: { type: String, default: '' },
             video: { type: String, default: '' }
         },
